@@ -1056,16 +1056,22 @@ class CodeExtraction(inoxCtx: inox.Context,
     }
   }
 
-  private def extractMatchCase(cd: tpd.CaseDef)(using dctx: DefContext): xt.MatchCase = {
-    val (recPattern, ndctx) = extractPattern(cd.pat, None)
-    val recBody             = extractTree(cd.body)(using ndctx)
+  private def extractMatchCase(cd: tpd.CaseDef)(using dctx: DefContext): List[xt.MatchCase] = {
 
-    if (cd.guard == tpd.EmptyTree) {
-      xt.MatchCase(recPattern, None, recBody).setPos(cd.sourcePos)
-    } else {
-      val recGuard = extractTree(cd.guard)(using ndctx)
-      xt.MatchCase(recPattern, Some(recGuard), recBody).setPos(cd.sourcePos)
-    }
+    cd.pat match
+      case p @ Alternative(trees) =>
+        val caseDefs = trees.map(tpd.CaseDef(_, cd.guard, cd.body))
+        caseDefs.flatMap(extractMatchCase(_))
+      case _ =>
+        val (recPattern, ndctx) = extractPattern(cd.pat, None)
+        val recBody             = extractTree(cd.body)(using ndctx)
+
+        if (cd.guard == tpd.EmptyTree) {
+          List(xt.MatchCase(recPattern, None, recBody).setPos(cd.sourcePos))
+        } else {
+          val recGuard = extractTree(cd.guard)(using ndctx)
+          List(xt.MatchCase(recPattern, Some(recGuard), recBody).setPos(cd.sourcePos))
+        }
   }
 
   private def extractTreeOrNoTree(tr: tpd.Tree)(using dctx: DefContext): xt.Expr = {
@@ -1333,7 +1339,7 @@ class CodeExtraction(inoxCtx: inox.Context,
 
     case Try(body, cses, fin) =>
       val rb = extractTree(body)
-      val rc = cses.map(extractMatchCase)
+      val rc = cses.flatMap(extractMatchCase)
       xt.Try(rb, rc, if (fin == tpd.EmptyTree) None else Some(extractTree(fin)))
 
     case Return(e, _) => xt.Return(extractTree(e))
@@ -1420,7 +1426,7 @@ class CodeExtraction(inoxCtx: inox.Context,
     case ExPasses(in, out, cases) =>
       val ine = extractTree(in)
       val oute = extractTree(out)
-      val rc = cases.map(extractMatchCase)
+      val rc = cases.flatMap(extractMatchCase)
 
       xt.Passes(ine, oute, rc)
 
@@ -1776,7 +1782,7 @@ class CodeExtraction(inoxCtx: inox.Context,
       }
 
     case Match(scrut, cases) =>
-      xt.MatchExpr(extractTree(scrut), cases.map(extractMatchCase))
+      xt.MatchExpr(extractTree(scrut), cases.flatMap(extractMatchCase))
 
     case t @ This(_) =>
       extractType(t) match {
