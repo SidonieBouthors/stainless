@@ -12,9 +12,9 @@ object PatternDisjunction {
   def subsetOf(a: SignSet, b: SignSet): Boolean = (a, b) match {
     case (None, _) => true
     case (_, Any) => true
-    case (Neg, NegZ | NotZer) => true
-    case (Zer, NegZ | PosZer) => true
-    case (Pos, NotZ | PosZer) => true
+    case (Neg, NegZer | NotZer) => true
+    case (Zer, NegZer | PosZer) => true
+    case (Pos, NotZer | PosZer) => true
     case _                  => false
   }
 }
