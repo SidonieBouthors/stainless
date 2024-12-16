@@ -916,7 +916,10 @@ class CodeExtraction(inoxCtx: inox.Context,
   // since these type tests are redundant. If we do not do so, we would be falling into an "Unsupported pattern" error.
   // Note that this pattern will be correctly rejected as "Unsupported pattern" (in fact, it cannot be even tested at runtime):
   //     val (aa: B, bb: B) = (a, b)
-  private def extractPattern(p: tpd.Tree, expectedTpe: Option[xt.Type], binder: Option[xt.ValDef] = None)(using dctx: DefContext): (xt.Pattern, DefContext) = p match {
+  private def extractPattern(p: tpd.Tree, expectedTpe: Option[xt.Type], binder: Option[xt.ValDef] = None)(using dctx: DefContext): List[(xt.Pattern, DefContext)] = p match {
+    case a @ Alternative(trees) =>
+      trees.flatMap(extractPattern(_, expectedTpe, binder))
+    
     case b @ Bind(name, t @ Typed(pat, tpt)) =>
       val vd = xt.ValDef(FreshIdentifier(name.toString), extractType(tpt), annotationsOf(b.symbol, ignoreOwner = true)).setPos(b.sourcePos)
       val pctx = dctx.withNewVar(b.symbol -> (() => vd.toVariable))
@@ -930,20 +933,20 @@ class CodeExtraction(inoxCtx: inox.Context,
     case t @ Typed(Ident(nme.WILDCARD), tpt) =>
       extractType(tpt)(using dctx.setResolveTypes(true)) match {
         case ct: xt.ClassType =>
-          (xt.InstanceOfPattern(binder, ct).setPos(p.sourcePos), dctx)
+          (xt.InstanceOfPattern(binder, ct).setPos(p.sourcePos), dctx) :: Nil
         case lt if expectedTpe.contains(lt) =>
-          (xt.WildcardPattern(binder), dctx)
+          (xt.WildcardPattern(binder), dctx) :: Nil
         case lt =>
           outOfSubsetError(p, s"Unsupported pattern: ${p.show}")
       }
 
     case Ident(nme.WILDCARD) =>
-      (xt.WildcardPattern(binder).setPos(p.sourcePos), dctx)
+      (xt.WildcardPattern(binder).setPos(p.sourcePos), dctx) :: Nil
 
     case s @ Select(_, b) if (s.tpe.widenDealias.typeSymbol `isOneOf` (Case | Module)) || (s.tpe.termSymbol `is` Case) =>
       extractType(s)(using dctx.setResolveTypes(true)) match {
         case ct: xt.ClassType =>
-          (xt.ClassPattern(binder, ct, Seq()).setPos(p.sourcePos), dctx)
+          (xt.ClassPattern(binder, ct, Seq()).setPos(p.sourcePos), dctx) :: Nil
         case _ =>
           outOfSubsetError(p, s"Unsupported pattern: ${p.show}")
       }
@@ -951,22 +954,22 @@ class CodeExtraction(inoxCtx: inox.Context,
     case id @ Ident(_) if id.symbol `isOneOf` (Case | Module) =>
       extractType(id)(using dctx.setResolveTypes(true)) match {
         case ct: xt.ClassType =>
-          (xt.ClassPattern(binder, ct, Seq()).setPos(p.sourcePos), dctx)
+          (xt.ClassPattern(binder, ct, Seq()).setPos(p.sourcePos), dctx) :: Nil
         case _ =>
           outOfSubsetError(p, s"Unsupported pattern: ${p.show}")
       }
 
     case ExBigIntPattern(l) =>
       val lit = xt.IntegerLiteral(BigInt(l.const.stringValue))
-      (xt.LiteralPattern(binder, lit), dctx)
+      (xt.LiteralPattern(binder, lit), dctx) :: Nil
 
-    case ExInt8Literal(i)    => (xt.LiteralPattern(binder, xt.Int8Literal(i)),    dctx)
-    case ExInt16Literal(i)   => (xt.LiteralPattern(binder, xt.Int16Literal(i)),   dctx)
-    case ExInt32Literal(i)   => (xt.LiteralPattern(binder, xt.Int32Literal(i)),   dctx)
-    case ExInt64Literal(i)   => (xt.LiteralPattern(binder, xt.Int64Literal(i)),   dctx)
-    case ExBooleanLiteral(b) => (xt.LiteralPattern(binder, xt.BooleanLiteral(b)), dctx)
-    case ExUnitLiteral()     => (xt.LiteralPattern(binder, xt.UnitLiteral()),     dctx)
-    case ExStringLiteral(s)  => (xt.LiteralPattern(binder, xt.StringLiteral(s)),  dctx)
+    case ExInt8Literal(i)    => (xt.LiteralPattern(binder, xt.Int8Literal(i)),    dctx) :: Nil
+    case ExInt16Literal(i)   => (xt.LiteralPattern(binder, xt.Int16Literal(i)),   dctx) :: Nil
+    case ExInt32Literal(i)   => (xt.LiteralPattern(binder, xt.Int32Literal(i)),   dctx) :: Nil
+    case ExInt64Literal(i)   => (xt.LiteralPattern(binder, xt.Int64Literal(i)),   dctx) :: Nil
+    case ExBooleanLiteral(b) => (xt.LiteralPattern(binder, xt.BooleanLiteral(b)), dctx) :: Nil
+    case ExUnitLiteral()     => (xt.LiteralPattern(binder, xt.UnitLiteral()),     dctx) :: Nil
+    case ExStringLiteral(s)  => (xt.LiteralPattern(binder, xt.StringLiteral(s)),  dctx) :: Nil
 
     case t @ Typed(un@UnApply(f, _, pats), tp) =>
       val subPatTps = resolveUnapplySubPatternsTps(un)
@@ -978,11 +981,11 @@ class CodeExtraction(inoxCtx: inox.Context,
       if (sym.owner.exists && sym.owner.is(Synthetic) &&
           sym.owner.companionClass.exists && sym.owner.companionClass.is(Case)) {
         val ct = extractType(tp).asInstanceOf[xt.ClassType]
-        (xt.ClassPattern(binder, ct, subPatterns).setPos(p.sourcePos), nctx)
+        (xt.ClassPattern(binder, ct, subPatterns).setPos(p.sourcePos), nctx) :: Nil
       } else {
         val id = getIdentifier(sym)
         val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
-        (xt.UnapplyPattern(binder, Seq(), id, tps, subPatterns).setPos(t.sourcePos), nctx)
+        (xt.UnapplyPattern(binder, Seq(), id, tps, subPatterns).setPos(t.sourcePos), nctx) :: Nil
       }
 
     case un@UnApply(f, _, pats) =>
@@ -993,16 +996,16 @@ class CodeExtraction(inoxCtx: inox.Context,
 
       val sym = f.symbol
       if (sym.owner.exists && TupleSymbol.unapply(sym.owner.companionClass).isDefined) {
-        (xt.TuplePattern(binder, subPatterns), nctx)
+        (xt.TuplePattern(binder, subPatterns), nctx) :: Nil
       } else if (sym.owner.exists && sym.owner.is(Synthetic) &&
           sym.owner.companionClass.exists && sym.owner.companionClass.is(Case)) {
         val id = getIdentifier(sym.owner.companionClass)
         val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
-        (xt.ClassPattern(binder, xt.ClassType(id, tps).setPos(p.sourcePos), subPatterns).setPos(p.sourcePos), nctx)
+        (xt.ClassPattern(binder, xt.ClassType(id, tps).setPos(p.sourcePos), subPatterns).setPos(p.sourcePos), nctx) :: Nil
       } else {
         val id = getIdentifier(sym)
         val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
-        (xt.UnapplyPattern(binder, Seq(), id, tps, subPatterns).setPos(p.sourcePos), nctx)
+        (xt.UnapplyPattern(binder, Seq(), id, tps, subPatterns).setPos(p.sourcePos), nctx) :: Nil
       }
 
     case _ =>
@@ -1057,21 +1060,13 @@ class CodeExtraction(inoxCtx: inox.Context,
   }
 
   private def extractMatchCase(cd: tpd.CaseDef)(using dctx: DefContext): List[xt.MatchCase] = {
-
-    cd.pat match
-      case p @ Alternative(trees) =>
-        val caseDefs = trees.map(tpd.CaseDef(_, cd.guard, cd.body))
-        caseDefs.flatMap(extractMatchCase(_))
-      case _ =>
-        val (recPattern, ndctx) = extractPattern(cd.pat, None)
-        val recBody             = extractTree(cd.body)(using ndctx)
-
-        if (cd.guard == tpd.EmptyTree) {
-          List(xt.MatchCase(recPattern, None, recBody).setPos(cd.sourcePos))
-        } else {
-          val recGuard = extractTree(cd.guard)(using ndctx)
-          List(xt.MatchCase(recPattern, Some(recGuard), recBody).setPos(cd.sourcePos))
-        }
+    val patterns = extractPattern(cd.pat, None)
+    patterns.map { 
+      case (recPattern, ndctx) =>
+        val recBody = extractTree(cd.body)(using ndctx)
+        val guard = if (cd.guard == tpd.EmptyTree) None else Some(extractTree(cd.guard)(using ndctx))
+        xt.MatchCase(recPattern, guard, recBody).setPos(cd.sourcePos)
+    }
   }
 
   private def extractTreeOrNoTree(tr: tpd.Tree)(using dctx: DefContext): xt.Expr = {
