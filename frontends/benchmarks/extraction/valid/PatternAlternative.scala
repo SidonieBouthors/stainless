@@ -1,4 +1,4 @@
-object PatternDisjunction {
+object PatternAlternative {
   sealed trait SignSet
   case object None extends SignSet
   case object Any extends SignSet
