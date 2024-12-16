@@ -972,40 +972,49 @@ class CodeExtraction(inoxCtx: inox.Context,
     case ExStringLiteral(s)  => (xt.LiteralPattern(binder, xt.StringLiteral(s)),  dctx) :: Nil
 
     case t @ Typed(un@UnApply(f, _, pats), tp) =>
+      reporter.debug("in typed unapply")
       val subPatTps = resolveUnapplySubPatternsTps(un)
       assert(subPatTps.size == pats.size)
-      val (subPatterns, subDctx) = pats.zip(subPatTps).map { case (pat, tp) => extractPattern(pat, Some(tp)) }.unzip
-      val nctx = subDctx.foldLeft(dctx)(_ `union` _)
+      val extractedPatterns = pats.zip(subPatTps).map { case (pat, tp) => extractPattern(pat, Some(tp)) }
+      val cross : List[(List[xt.Pattern], List[DefContext])] = extractedPatterns.foldLeft(List(List[(xt.Pattern, DefContext)]()))((acc, l) => acc.flatMap(i => l.map(j => i ::: List(j)))).map(_.unzip)
+      cross.map { (subPatterns, subDctx) =>
+        val nctx = subDctx.foldLeft(dctx)(_ `union` _)
 
-      val sym = f.symbol
-      if (sym.owner.exists && sym.owner.is(Synthetic) &&
-          sym.owner.companionClass.exists && sym.owner.companionClass.is(Case)) {
-        val ct = extractType(tp).asInstanceOf[xt.ClassType]
-        (xt.ClassPattern(binder, ct, subPatterns).setPos(p.sourcePos), nctx) :: Nil
-      } else {
-        val id = getIdentifier(sym)
-        val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
-        (xt.UnapplyPattern(binder, Seq(), id, tps, subPatterns).setPos(t.sourcePos), nctx) :: Nil
+        val sym = f.symbol
+        if (sym.owner.exists && sym.owner.is(Synthetic) &&
+            sym.owner.companionClass.exists && sym.owner.companionClass.is(Case)) {
+          val ct = extractType(tp).asInstanceOf[xt.ClassType]
+          (xt.ClassPattern(binder, ct, subPatterns).setPos(p.sourcePos), nctx)
+        } else {
+          val id = getIdentifier(sym)
+          val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
+          (xt.UnapplyPattern(binder, Seq(), id, tps, subPatterns).setPos(t.sourcePos), nctx)
+        }
       }
 
     case un@UnApply(f, _, pats) =>
+      reporter.debug("in unapply")
       val subPatTps = resolveUnapplySubPatternsTps(un)
       assert(subPatTps.size == pats.size)
-      val (subPatterns, subDctx) = pats.zip(subPatTps).map { case (pat, tp) => extractPattern(pat, Some(tp)) }.unzip
-      val nctx = subDctx.foldLeft(dctx)(_ `union` _)
+      val extractedPatterns : List[List[(xt.Pattern, DefContext)]] = pats.zip(subPatTps).map { case (pat, tp) => extractPattern(pat, Some(tp)) }
+      val cross : List[(List[xt.Pattern], List[DefContext])] = extractedPatterns.foldLeft(List(List[(xt.Pattern, DefContext)]()))
+        ((acc, l) => acc.flatMap(i => l.map(j => i ::: List(j)))).map(_.unzip)
+      cross.map { (subPatterns, subDctx) =>
+        val nctx = subDctx.foldLeft(dctx)(_ `union` _)
 
-      val sym = f.symbol
-      if (sym.owner.exists && TupleSymbol.unapply(sym.owner.companionClass).isDefined) {
-        (xt.TuplePattern(binder, subPatterns), nctx) :: Nil
-      } else if (sym.owner.exists && sym.owner.is(Synthetic) &&
-          sym.owner.companionClass.exists && sym.owner.companionClass.is(Case)) {
-        val id = getIdentifier(sym.owner.companionClass)
-        val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
-        (xt.ClassPattern(binder, xt.ClassType(id, tps).setPos(p.sourcePos), subPatterns).setPos(p.sourcePos), nctx) :: Nil
-      } else {
-        val id = getIdentifier(sym)
-        val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
-        (xt.UnapplyPattern(binder, Seq(), id, tps, subPatterns).setPos(p.sourcePos), nctx) :: Nil
+        val sym = f.symbol
+        if (sym.owner.exists && TupleSymbol.unapply(sym.owner.companionClass).isDefined) {
+          (xt.TuplePattern(binder, subPatterns), nctx)
+        } else if (sym.owner.exists && sym.owner.is(Synthetic) &&
+            sym.owner.companionClass.exists && sym.owner.companionClass.is(Case)) {
+          val id = getIdentifier(sym.owner.companionClass)
+          val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
+          (xt.ClassPattern(binder, xt.ClassType(id, tps).setPos(p.sourcePos), subPatterns).setPos(p.sourcePos), nctx)
+        } else {
+          val id = getIdentifier(sym)
+          val tps = f match { case TypeApply(un, tps) => tps map extractType case _ => Seq.empty }
+          (xt.UnapplyPattern(binder, Seq(), id, tps, subPatterns).setPos(p.sourcePos), nctx)
+        }
       }
 
     case _ =>
